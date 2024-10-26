@@ -6,8 +6,7 @@ Example of a durable object that stores data in memory. Suitable for caching, bu
 
 ## Features
 
-Will output geo information about the caller if called for the first time, and information about the PREVIOUS caller if
-called again.
+Will output geo information about the caller if called for the first time, and information about the PREVIOUS caller if called again.
 
 First request:
 
