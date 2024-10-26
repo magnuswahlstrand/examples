@@ -1,0 +1,11 @@
+name = "durable-object-in-memory"
+main = "src/index.ts"
+compatibility_date = "2024-10-26"
+
+[[durable_objects.bindings]]
+name = "LOCATION"
+class_name = "Location"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Location"]
