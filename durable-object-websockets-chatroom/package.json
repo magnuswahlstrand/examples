@@ -1,0 +1,16 @@
+{
+  "name": "durable-object-websockets-chatroom",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "hono": "^4.6.7",
+    "valibot": "^0.42.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241022.0",
+    "wrangler": "^3.79.0"
+  }
+}

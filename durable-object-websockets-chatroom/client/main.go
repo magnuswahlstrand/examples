@@ -1,0 +1,137 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"github.com/99designs/goodies/stringslice"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"strings"
+)
+
+type MessageHandler struct {
+	clientId string
+	nickname string
+}
+
+func (m *MessageHandler) formatOutput(message string) string {
+	return fmt.Sprintf("%s:%s: %s", m.clientId, m.nickname, message)
+}
+
+var styleOwnMessage = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+var styleOwnNickname = styleOwnMessage.Bold(true).Width(12)
+
+var styleMessage = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+var styleOtherNickname = styleMessage.Bold(true).Width(12)
+
+func (m *MessageHandler) formatInput(s string) string {
+	parts := strings.SplitN(s, ":", 3)
+	if len(parts) < 3 {
+		return s
+	}
+
+	if parts[0] == m.clientId {
+		return styleOwnNickname.Render(parts[1]+":") + styleOwnMessage.Render(parts[2])
+	}
+
+	return styleOtherNickname.Render(parts[1]+":") + styleMessage.Render(parts[2])
+}
+
+func (m *MessageHandler) updateNickname(newNickname string) {
+	m.nickname = newNickname
+}
+
+func main() {
+	// Flags for nickname and room
+	var nickname string
+	flag.StringVar(&nickname, "nickname", "anonymous", "Nickname to use in chat")
+	var room string
+	flag.StringVar(&room, "room", "", "Room to join, e.g. 'stockholm'")
+	var clientId string
+	flag.StringVar(&clientId, "clientId", "", "Client ID to use in chat")
+	var host string
+	flag.StringVar(&host, "host", "localhost:8787", "Host to connect to")
+	flag.Parse()
+
+	if room == "" {
+		fmt.Println("Please provide a room")
+		return
+	}
+
+	if clientId == "" {
+		clientId = uuid.New().String()
+	}
+
+	//messageOut := make(chan string)
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+
+	// Yes, this is silly :-)
+	schemePostfix := "s"
+	if strings.Contains(host, "localhost") {
+		schemePostfix = ""
+	}
+	u1 := url.URL{Scheme: "http" + schemePostfix, Host: host, Path: "/history", RawQuery: "room=" + room}
+	u := url.URL{Scheme: "ws" + schemePostfix, Host: host, Path: "/ws", RawQuery: "room=" + room}
+
+	resp0, err := http.DefaultClient.Get(u1.String())
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp0.Body.Close()
+
+	// Parse the response
+	var messages []string
+	if err := json.NewDecoder(resp0.Body).Decode(&messages); err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("connecting to %s\n", u.String())
+	c, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		log.Printf("handshake failed with status %d", resp.StatusCode)
+		log.Fatal("dial:", err)
+	}
+	defer resp.Body.Close()
+
+	messageHandler := MessageHandler{
+		clientId: clientId,
+		nickname: nickname,
+	}
+
+	formattedMessages := stringslice.Map(messages, func(s string) string {
+		return messageHandler.formatInput(s)
+	})
+
+	//When the program closes the connection
+	defer c.Close()
+
+	p := tea.NewProgram(initialModel(c, messageHandler, fmt.Sprintf("# %s", room), formattedMessages))
+
+	// TODO: Refactor
+	//done := make(chan struct{})
+	go func() {
+		//defer close(done)
+		for {
+			_, message, err := c.ReadMessage()
+			if err != nil {
+				log.Println("read:", err)
+				return
+			}
+			p.Send(WebSocketMessage{Content: string(message)})
+		}
+
+	}()
+
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
