@@ -22,10 +22,22 @@ export class Room extends DurableObject {
     }
 
     async webSocketMessage(ws: WebSocket, message: string) {
+        const messages = await this.ctx.storage.get('messages') as string[] | undefined
+        if (messages == undefined) {
+            await this.ctx.storage.put('messages', [message])
+        } else {
+            messages.push(message)
+            await this.ctx.storage.put('messages', messages)
+        }
+
         this.ctx.getWebSockets().forEach(ws => ws.send(message));
     }
 
     async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
         ws.close();
+    }
+
+    async getHistory(): Promise<string[]> {
+        return await this.ctx.storage.get('messages') as string[] || []
     }
 }

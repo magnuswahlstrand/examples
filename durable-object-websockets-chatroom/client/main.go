@@ -1,13 +1,16 @@
 package main
 
 import (
-	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/fatih/color"
+	"github.com/99designs/goodies/stringslice"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -23,6 +26,12 @@ func (m *MessageHandler) formatOutput(message string) string {
 	return fmt.Sprintf("%s:%s: %s", m.clientId, m.nickname, message)
 }
 
+var styleOwnMessage = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+var styleOwnNickname = styleOwnMessage.Bold(true).Width(12)
+
+var styleMessage = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+var styleOtherNickname = styleMessage.Bold(true).Width(12)
+
 func (m *MessageHandler) formatInput(s string) string {
 	parts := strings.SplitN(s, ":", 3)
 	if len(parts) < 3 {
@@ -30,10 +39,10 @@ func (m *MessageHandler) formatInput(s string) string {
 	}
 
 	if parts[0] == m.clientId {
-		return fmt.Sprintf("%s: %s", color.HiGreenString(parts[1]), color.GreenString(parts[2]))
+		return styleOwnNickname.Render(parts[1]+":") + styleOwnMessage.Render(parts[2])
 	}
 
-	return fmt.Sprintf("%s: %s", color.HiWhiteString(parts[1]), color.WhiteString(parts[2]))
+	return styleOtherNickname.Render(parts[1]+":") + styleMessage.Render(parts[2])
 }
 
 func (m *MessageHandler) updateNickname(newNickname string) {
@@ -48,6 +57,8 @@ func main() {
 	flag.StringVar(&room, "room", "", "Room to join, e.g. 'stockholm'")
 	var clientId string
 	flag.StringVar(&clientId, "clientId", "", "Client ID to use in chat")
+	var host string
+	flag.StringVar(&host, "host", "localhost:8787", "Host to connect to")
 	flag.Parse()
 
 	if room == "" {
@@ -59,11 +70,30 @@ func main() {
 		clientId = uuid.New().String()
 	}
 
-	messageOut := make(chan string)
+	//messageOut := make(chan string)
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	u := url.URL{Scheme: "ws", Host: "localhost:8787", Path: "/ws", RawQuery: "room=" + room}
+	// Yes, this is silly :-)
+	schemePostfix := "s"
+	if strings.Contains(host, "localhost") {
+		schemePostfix = ""
+	}
+	u1 := url.URL{Scheme: "http" + schemePostfix, Host: host, Path: "/history", RawQuery: "room=" + room}
+	u := url.URL{Scheme: "ws" + schemePostfix, Host: host, Path: "/ws", RawQuery: "room=" + room}
+
+	resp0, err := http.DefaultClient.Get(u1.String())
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp0.Body.Close()
+
+	// Parse the response
+	var messages []string
+	if err := json.NewDecoder(resp0.Body).Decode(&messages); err != nil {
+		log.Fatal(err)
+	}
+
 	fmt.Printf("connecting to %s\n", u.String())
 	c, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
@@ -72,73 +102,36 @@ func main() {
 	}
 	defer resp.Body.Close()
 
-	//var result map[string]interface{}
-	//if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-	//	log.Fatal("decode:", err)
-	//}
-
 	messageHandler := MessageHandler{
 		clientId: clientId,
 		nickname: nickname,
 	}
 
+	formattedMessages := stringslice.Map(messages, func(s string) string {
+		return messageHandler.formatInput(s)
+	})
+
 	//When the program closes the connection
 	defer c.Close()
-	done := make(chan struct{})
+
+	p := tea.NewProgram(initialModel(c, messageHandler, fmt.Sprintf("# %s", room), formattedMessages))
+
+	// TODO: Refactor
+	//done := make(chan struct{})
 	go func() {
-		defer close(done)
+		//defer close(done)
 		for {
 			_, message, err := c.ReadMessage()
 			if err != nil {
 				log.Println("read:", err)
 				return
 			}
-
-			fmt.Printf("%s\n", messageHandler.formatInput(string(message)))
+			p.Send(WebSocketMessage{Content: string(message)})
 		}
 
 	}()
 
-	go func() {
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			text, _ := reader.ReadString('\n')
-			trimmed := strings.Trim(text, "\n")
-
-			if strings.HasPrefix(trimmed, "/") {
-				switch {
-				case strings.HasPrefix(trimmed, "/nickname "):
-					newNickname := strings.TrimPrefix(trimmed, "/nickname ")
-					messageOut <- fmt.Sprintf("<%s> changed name to <%s>", nickname, newNickname)
-					messageHandler.updateNickname(newNickname)
-					continue
-				default:
-					fmt.Printf(color.RedString("Unknown command %q\n"), trimmed)
-					continue
-				}
-			}
-
-			messageOut <- messageHandler.formatOutput(trimmed)
-		}
-	}()
-
-	for {
-		select {
-		case <-done:
-			return
-		case m := <-messageOut:
-			err := c.WriteMessage(websocket.TextMessage, []byte(m))
-			if err != nil {
-				log.Println("write:", err)
-				return
-			}
-		case <-interrupt:
-			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-			if err != nil {
-				log.Println("write close:", err)
-				return
-			}
-			return
-		}
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
 	}
 }
