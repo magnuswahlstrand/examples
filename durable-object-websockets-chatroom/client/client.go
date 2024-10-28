@@ -1,13 +1,11 @@
-package main
+package client
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"github.com/99designs/goodies/stringslice"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
@@ -49,27 +47,7 @@ func (m *MessageHandler) updateNickname(newNickname string) {
 	m.nickname = newNickname
 }
 
-func main() {
-	// Flags for nickname and room
-	var nickname string
-	flag.StringVar(&nickname, "nickname", "anonymous", "Nickname to use in chat")
-	var room string
-	flag.StringVar(&room, "room", "", "Room to join, e.g. 'stockholm'")
-	var clientId string
-	flag.StringVar(&clientId, "clientId", "", "Client ID to use in chat")
-	var host string
-	flag.StringVar(&host, "host", "localhost:8787", "Host to connect to")
-	flag.Parse()
-
-	if room == "" {
-		fmt.Println("Please provide a room")
-		return
-	}
-
-	if clientId == "" {
-		clientId = uuid.New().String()
-	}
-
+func Run(host string, room string, clientId string, nickname string) {
 	//messageOut := make(chan string)
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
