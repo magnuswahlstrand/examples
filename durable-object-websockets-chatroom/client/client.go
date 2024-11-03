@@ -25,22 +25,31 @@ func (m *MessageHandler) formatOutput(message string) string {
 }
 
 var styleOwnMessage = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-var styleOwnNickname = styleOwnMessage.Bold(true).Width(12)
+var styleOwnNickname = styleOwnMessage.Bold(true).Width(10)
 
 var styleMessage = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
-var styleOtherNickname = styleMessage.Bold(true).Width(12)
+var styleOtherNickname = styleMessage.Bold(true).Width(10)
+
+var errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 
 func (m *MessageHandler) formatInput(s string) string {
+	//return s
+	if strings.HasPrefix(s, "err") {
+		return errorStyle.Render(strings.TrimPrefix(s, "err:"))
+	}
+
 	parts := strings.SplitN(s, ":", 3)
+
 	if len(parts) < 3 {
 		return s
 	}
+	//return fmt.Sprintf("%s ||| %s", parts[1], parts[2]) //, len(parts), parts[0], parts[1])
 
 	if parts[0] == m.clientId {
-		return styleOwnNickname.Render(parts[1]+":") + styleOwnMessage.Render(parts[2])
+		return styleOwnNickname.Render(parts[1]) + "|" + styleOwnMessage.Render(parts[2])
 	}
 
-	return styleOtherNickname.Render(parts[1]+":") + styleMessage.Render(parts[2])
+	return styleOtherNickname.Render(parts[1]) + "|" + styleMessage.Render(parts[2])
 }
 
 func (m *MessageHandler) updateNickname(newNickname string) {
@@ -104,7 +113,7 @@ func Run(host string, room string, clientId string, nickname string) {
 				log.Println("read:", err)
 				return
 			}
-			p.Send(WebSocketMessage{Content: string(message)})
+			p.Send(ReceivedWebSocketMessage{Content: string(message)})
 		}
 
 	}()

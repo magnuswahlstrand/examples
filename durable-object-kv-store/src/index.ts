@@ -18,20 +18,24 @@ export interface Env {
 // Worker
 const handler: ExportedHandler<Env> = {
     async fetch(request, env: Env) {
+        const url = new URL(request.url)
+        if (url.pathname != "/") {
+            return new Response("Not found", {status: 404})
+        }
+
         let id = env.LOCATION.idFromName("main");
         let locationDO = env.LOCATION.get(id);
 
-        const location = {
-            city: request.cf?.city,
-            countryCode: request.cf?.country,
-            postalCode: request.cf?.postalCode,
-            isEUCountry: request.cf?.isEUCountry == "1"
-        }
 
         // RPC to the Durable Object
-        const resp = await locationDO.updateAndGetLocationText(location)
+        const resp = await locationDO.trackClientCity(request?.cf?.city || "unknown");
 
-        return new Response(resp);
+        const sorted = '\n\n' + Object.entries(resp)
+            .sort(([, a], [, b]) => b - a)
+            .map(([city, count]) => `${city}: ${count}`)
+            .join('\n')
+
+        return new Response(sorted);
     }
 }
 

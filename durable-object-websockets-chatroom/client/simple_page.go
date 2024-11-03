@@ -2,11 +2,11 @@ package client
 
 import (
 	"fmt"
+	"github.com/99designs/goodies/stringslice"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
 	"github.com/gorilla/websocket"
 	"log"
 	"strings"
@@ -55,7 +55,7 @@ var (
 	}()
 )
 
-type WebSocketMessage struct {
+type ReceivedWebSocketMessage struct {
 	Content string
 }
 
@@ -65,6 +65,13 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+
+	refreshContent := func() {
+		m.viewport.SetContent(strings.Join(stringslice.Map(m.messages, func(s string) string {
+			return m.messageHandler.formatInput(s)
+		}), "\n"))
+		m.viewport.GotoBottom()
+	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -89,22 +96,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport = viewport.New(msg.Width, msg.Height-verticalMarginHeight)
 			m.viewport.YPosition = headerHeight
 			// TODO: How do I make this a common method?
-			m.viewport.SetContent(strings.Join(m.messages, "\n"))
-			m.viewport.GotoBottom()
+			refreshContent()
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - verticalMarginHeight
 		}
-	case WebSocketMessage:
-		m.messages = append(m.messages, m.messageHandler.formatInput(msg.Content))
-		m.viewport.SetContent(strings.Join(m.messages, "\n"))
-		m.viewport.GotoBottom()
+	case ReceivedWebSocketMessage:
+		m.messages = append(m.messages, msg.Content)
+		refreshContent()
 		return m, nil
 
 	// We handle errors just like any other message
 	case errMsg:
-		m.err = msg
+		m.messages = append(m.messages, msg.Error())
+		refreshContent()
 		return m, nil
 	}
 
@@ -125,16 +131,18 @@ func (m model) handleInput() (tea.Model, tea.Cmd) {
 		switch {
 		case strings.HasPrefix(v, "/nickname "):
 			newNickname := strings.TrimPrefix(v, "/nickname ")
-			// TODO: Refactor
 			message = fmt.Sprintf("%s changed nickname to %s", m.messageHandler.nickname, newNickname)
 			m.messageHandler.updateNickname(newNickname)
 		default:
-			// TODO: Handle in a better way
-			fmt.Printf(color.RedString("Unknown command %q\n"), v)
+			m.textInput.Reset()
+			return m, func() tea.Msg {
+				return errMsg(fmt.Errorf("err:Unknown command: %s", v))
+			}
 		}
 	} else {
 		message = m.messageHandler.formatOutput(v)
 	}
+
 	err := m.websocket.WriteMessage(websocket.TextMessage, []byte(message))
 	if err != nil {
 		log.Println("write:", err)
@@ -143,11 +151,6 @@ func (m model) handleInput() (tea.Model, tea.Cmd) {
 
 	m.textInput.Reset()
 	return m, nil
-}
-
-func (m model) redrawContent() {
-	m.viewport.SetContent(strings.Join(m.messages, "\n"))
-	m.viewport.GotoBottom()
 }
 
 func (m model) headerView() string {
